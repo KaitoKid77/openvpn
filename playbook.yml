@@ -1,0 +1,111 @@
+                                                                                                                                                                                                                                                                                               
+---
+- name: Install and Configure OpenVPN Server
+  hosts: localhost
+  become: true
+  become_user: root
+  vars:
+    openvpn_ca_name: "myca"
+
+  tasks:
+
+    - name: Generate a unique server name
+      set_fact:
+        openvpn_server_name: "new_server{{ (1000 + (ansible_date_time.epoch | int)) | string }}"
+
+    - name: Generate a unique client name
+      set_fact:
+        openvpn_clients:
+          - name: "new_client{{ (1000 + (ansible_date_time.epoch | int)) | string }}"
+          - name: "new_client{{ (1000 + (ansible_date_time.epoch | int) + 1) | string }}"
+
+    - name: Update system
+      apt:
+        update_cache: yes
+
+    - name: Install OpenVPN and Easy-RSA
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - openvpn
+        - easy-rsa
+
+    - name: Copy Easy-RSA configuration directory
+      command: cp -r /usr/share/easy-rsa /etc/
+
+    - name: Generate DH parameters
+      command: ./easyrsa gen-dh
+      args:
+        chdir: /etc/easy-rsa/
+      environment:
+        EASYRSA_BATCH: "yes"
+
+    - name: Build Server Cert
+      expect:
+        command: "./easyrsa build-server-full {{ openvpn_server_name }} nopass"
+        responses:
+          "Enter pass phrase for .*/pki/private/ca.key:": "1412\n"
+          timeout: 10  # Add a delay to ensure synchronization
+      args:
+        chdir: /etc/easy-rsa/
+      register: server_cert
+
+    - name: Generate HMAC key
+      command: openvpn --genkey secret /etc/easy-rsa/pki/ta.key
+
+    - name: Generate Revocation Certificate
+      expect:
+        command: ./easyrsa gen-crl
+        responses:
+          "Enter pass phrase for .*/pki/private/ca.key:": "1412\n"
+          timeout: 10  # Add a delay to ensure synchronization
+
+      args:
+        chdir: /etc/easy-rsa/
+      environment:
+        EASYRSA_BATCH: "yes"
+
+
+    - name: Create OpenVPN Clients Directories
+      file:
+        path: "/etc/openvpn/client/{{ item.name }}"
+        state: directory
+      loop: "{{ openvpn_clients }}"
+    - name: Copy OpenVPN Server Certificates and Keys
+      copy:
+        src: "/etc/easy-rsa/pki/{{ item }}"
+        dest: "/etc/openvpn/server/{{ item }}"
+        remote_src: yes
+      with_items:
+        - ca.crt
+        - dh.pem
+        - ta.key
+        - crl.pem
+        - issued
+        - private
+
+    - name: Build Client Certificates and Keys
+      expect:
+        command: ./easyrsa build-client-full {{ item.name }} nopass
+        responses:
+          "Enter pass phrase for .*/pki/private/ca.key:": "1412\n"
+          timeout: 10  # Add a delay to ensure synchronization
+      args:
+        chdir: /etc/easy-rsa/
+      environment:s
+        EASYRSA_BATCH: "yes"
+      loop: "{{ openvpn_clients }}"
+      # Add tasks to copy client keys and certificates
+
+    - name: Copy OpenVPN Server Config
+      template:
+        src: "templates/server.conf.j2"
+        dest: "/etc/openvpn/server/{{ openvpn_server_name }}.conf"
+        mode: 0644
+
+    - name: Start and enable OpenVPN service
+      systemd:
+        name: "openvpn-server@{{ openvpn_server_name }}"
+        enabled: yes
+        state: started
