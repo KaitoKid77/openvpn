@@ -1,0 +1,32 @@
+port 1194
+proto udp4
+dev tun
+ca /etc/openvpn/server/ca.crt
+cert /etc/openvpn/server/{{ openvpn_server_name }}/issued/issued/{{ openvpn_server_name }}.crt
+key /etc/openvpn/server/{{ openvpn_server_name }}/private/private/{{ openvpn_server_name }}.key
+dh /etc/openvpn/server/dh.pem
+topology subnet
+ifconfig-pool-persist /var/log/openvpn/ipp.txt
+
+client-to-client
+
+tls-auth /etc/openvpn/server/ta.key 0
+status /var/log/openvpn/openvpn-status.log
+log-append /var/log/openvpn/openvpn.log
+verb 3
+explicit-exit-notify 1
+
+server 172.172.172.0 255.255.255.0
+keepalive 10 120
+
+persist-key
+persist-tun
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305:AES-256-CBC
+data-ciphers-fallback AES-256-CBC
+auth SHA512
+tls-crypt tls-crypt.key 1
+sndbuf 512000
+rcvbuf 512000
+txqueuelen 2000
+fast-io
+
