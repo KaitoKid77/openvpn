@@ -1,0 +1,2 @@
+[webservers]
+10.10.1.32 ansible_user=root
